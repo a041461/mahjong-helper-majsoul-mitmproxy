@@ -1,12 +1,15 @@
 import json
 import logging
+import time
 from base64 import b64decode
+
 import requests
 import mitmproxy.http
 from urllib3 import disable_warnings
 from urllib3.exceptions import InsecureRequestWarning
 from google.protobuf.json_format import MessageToDict
 import liqi
+from convert_mjai import ConvertMjai
 from proto import liqi_pb2 as pb
 
 # 导入配置
@@ -26,6 +29,10 @@ disable_warnings(InsecureRequestWarning)
 
 
 class WebSocketAddon:
+
+    mahjong_json = open('mahjong_'+str(time.time())+'.txt', 'w')
+    mjai_json = open('mjai_'+str(time.time())+'.txt', 'w')
+    ConvertMjai = ConvertMjai()
     def websocket_message(self, flow: mitmproxy.http.HTTPFlow):
         # 在捕获到WebSocket消息时触发
         assert flow.websocket is not None  # make type checker happy
@@ -34,10 +41,13 @@ class WebSocketAddon:
         result = liqi_proto.parse(message)
         if message.from_client is False:
             logging.info(f'接收到：{result}')
+            WebSocketAddon.mahjong_json.write(str(result) + '\n')
+
         if result['method'] in SEND_METHOD and message.from_client is False:
             if result['method'] == '.lq.ActionPrototype':
                 if result['data']['name'] in SEND_ACTION:
                     data = result['data']['data']
+                    data['action'] = result['data']['name']
                     if result['data']['name'] == 'ActionNewRound':
                         # 雀魂弃用了md5改用sha256，但没有该字段会导致小助手无法解析牌局，也不能留空
                         # 所以干脆发一个假的，反正也用不到
@@ -63,12 +73,15 @@ class WebSocketAddon:
                 data = {'sync_game_actions': actions}
             else:
                 data = result['data']
-            logging.warn(f'已发送：{data}')
-            requests.post(API_URL, json=data, verify=False)
+            logging.error(f'已发送：{data}')
+
+            WebSocketAddon.mjai_json.write(str(ConvertMjai.convert_to_mjai(self, data)) + '\n')
+            WebSocketAddon.mjai_json.flush()
+            #requests.post(API_URL, json=data, verify=False)
             if 'liqi' in data.keys():  # 补发立直消息
-                logging.warn(f'已发送：{data["liqi"]}')
-                requests.post(API_URL,
-                              json=data['liqi'], verify=False)
+                logging.error(f'已发送：{data["liqi"]}')
+                #WebSocketAddon.fo.write(str(data["liqi"]))
+                #requests.post(API_URL, json=data['liqi'], verify=False)
 
 
 addons = [
